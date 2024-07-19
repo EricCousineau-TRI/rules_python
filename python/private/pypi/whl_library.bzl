@@ -314,6 +314,19 @@ def _whl_library_impl(rctx):
         )
         entry_points[entry_point_without_py] = entry_point_script_name
 
+    # read pth files
+    pth_files = {}
+    exec_result = repo_utils.execute_checked(
+        rctx,
+        op = "whl_library.ReadPthFiles({}, {})".format(rctx.attr.name, whl_path),
+        arguments = ["/usr/bin/ls", "-1", "site-packages/*.pth"],
+        environment = environment,
+        quiet = rctx.attr.quiet,
+        timeout = rctx.attr.timeout,
+    )
+    for pth_file in exec_result.stdout.splitlines():
+        pth_files[pth_file] = rctx.read(pth_file)
+
     build_file_contents = generate_whl_library_build_bazel(
         dep_template = rctx.attr.dep_template or "@{}{{name}}//:{{target}}".format(rctx.attr.repo_prefix),
         whl_name = whl_path.basename,
@@ -327,6 +340,7 @@ def _whl_library_impl(rctx):
             "pypi_version=" + metadata["version"],
         ],
         entry_points = entry_points,
+        pth_files = pth_files,
         annotation = None if not rctx.attr.annotation else struct(**json.decode(rctx.read(rctx.attr.annotation))),
     )
     rctx.file("BUILD.bazel", build_file_contents)

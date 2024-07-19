@@ -83,8 +83,9 @@ py_library(
         exclude={data_exclude},
     ),
     # This makes this directory a top-level in the python import
-    # search path for anything that depends on this.
-    imports = ["site-packages"],
+    # search path for anything that depends on this. It may also include
+    # parsed declarative (non-executable) *.pth files.
+    imports = {imports},
     deps = {dependencies},
     tags = {tags},
     visibility = {impl_vis},
@@ -199,7 +200,8 @@ def generate_whl_library_build_bazel(
         entry_points,
         annotation = None,
         group_name = None,
-        group_deps = []):
+        group_deps = [],
+        pth_files = {}):
     """Generate a BUILD file for an unzipped Wheel
 
     Args:
@@ -217,6 +219,8 @@ def generate_whl_library_build_bazel(
         group_deps: List[str]; names of fellow members of the group (if any). These will be excluded
           from generated deps lists so as to avoid direct cycles. These dependencies will be provided
           at runtime by the group rules which wrap this library and its fellows together.
+        pth_files: Dict[str, str]; look up of root-level *.pth files and their
+          contents.
 
     Returns:
         A complete BUILD file as a string
@@ -353,6 +357,11 @@ def generate_whl_library_build_bazel(
         whl_file_label = WHEEL_FILE_PUBLIC_LABEL
         impl_vis = ["//visibility:public"]
 
+    imports = ["site-packages"]
+    for contents in pth_files.values():
+        rel_imports = _maybe_extract_pth_file_paths(contents)
+        imports += ["site-packages/" + rel_import for rel_import in rel_imports]
+
     contents = "\n".join(
         [
             _BUILD_TEMPLATE.format(
@@ -369,6 +378,7 @@ def generate_whl_library_build_bazel(
                 entry_point_prefix = WHEEL_ENTRY_POINT_PREFIX,
                 srcs_exclude = repr(srcs_exclude),
                 data = repr(data),
+                imports = repr(imports),
                 impl_vis = repr(impl_vis),
             ),
         ] + additional_content,
@@ -376,6 +386,18 @@ def generate_whl_library_build_bazel(
 
     # NOTE: Ensure that we terminate with a new line
     return contents.rstrip() + "\n"
+
+def _maybe_extract_pth_file_paths(contents):
+    if "import sys" in contents:
+        # executable; ignore.
+        return []
+    paths = []
+    for line in contents.splitlines():
+        line = line.split("#")[0].strip()
+        if len(line) > 0:
+            paths.append(line)
+    return paths
+
 
 def _generate_copy_commands(src, dest, is_executable = False):
     """Generate a [@bazel_skylib//rules:copy_file.bzl%copy_file][cf] target
